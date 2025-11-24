@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+streamlit
+ib_insync
+pandas
+numpy
+sqlalchemy
+alembic
+asyncpg
+redis
+pydantic-settings
+psycopg2-binary
+plotly
+python-dotenv

@@ -1,0 +1,7 @@
+venv
+venv/*
+*.pyc
+*.log
+.vscode/launch.json
+.env
+*.pid

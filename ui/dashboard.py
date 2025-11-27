@@ -10,7 +10,7 @@ st.set_page_config(page_title="IBKR Algo Dashboard", layout="wide")
 
 st.title("LuxAlgo SMC Trading Bot")
 
-# Sidebar Controls
+# Sidebar Controls (Static - no auto-refresh)
 st.sidebar.header("Controls")
 
 if st.sidebar.button("Start Algo"):
@@ -48,28 +48,43 @@ with st.sidebar.expander("Settings"):
     except Exception as e:
         st.error(f"Could not load settings: {e}")
 
-# Status
+# Status and Metrics
 try:
     status = requests.get(f"{API_URL}/status").json()
+    account_data = requests.get(f"{API_URL}/account").json()
+    account = account_data.get('account', {}) if account_data.get('connected') else {}
     
-    col1, col2, col3, col4 = st.columns(4)
+    # Display 6 key metrics in columns
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
     with col1:
-        st.metric("Status", "Running" if status.get("running") else "Stopped")
+        status_text = "🟢 Live" if status.get("running") else "⚪ Idle"
+        st.metric("Status", status_text, label_visibility="collapsed")
+    
+    with col2:
+        net_liq = account.get('NetLiquidation', 0.0)
+        st.metric("💰 Net Value", f"${net_liq:,.0f}")
+    
+    with col3:
+        buying_power = account.get('BuyingPower', 0.0)
+        st.metric("⚡ Power", f"${buying_power:,.0f}")
+    
+    with col4:
+        margin = account.get('MaintMarginReq', 0.0)
+        st.metric("📊 Margin", f"${margin:,.0f}")
     
     pnl_data = status.get('pnl', {})
-    with col2:
+    with col5:
         total_pnl = pnl_data.get('total', 0.0)
-        st.metric("Total P&L", f"${total_pnl:.2f}", 
-                 delta=f"${total_pnl:.2f}" if total_pnl != 0 else None,
+        st.metric("💵 Total P&L", f"${total_pnl:.2f}", 
+                 delta=f"${total_pnl:.2f}",
                  delta_color="normal")
-    with col3:
-        realized_pnl = pnl_data.get('realized', 0.0)
-        st.metric("Realized P&L", f"${realized_pnl:.2f}")
-    with col4:
-        unrealized_pnl = pnl_data.get('unrealized', 0.0)
-        st.metric("Unrealized P&L", f"${unrealized_pnl:.2f}")
     
-    st.metric("Positions", status.get("positions", 0))
+    with col6:
+        unrealized_pnl = pnl_data.get('unrealized', 0.0)
+        st.metric("📈 Unreal.", f"${unrealized_pnl:.2f}",
+                 delta=f"${unrealized_pnl:.2f}",
+                 delta_color="normal")
 except:
     st.error("Backend not reachable")
 
@@ -78,6 +93,10 @@ st.header("Live Market Data (GC1!)")
 
 try:
     data = requests.get(f"{API_URL}/data").json()
+    
+    # Debug info
+    st.caption(f"Connected: {data.get('connected', False)} | Running: {data.get('running', False)} | Bars: {len(data.get('data', []))}")
+    
     if data["data"]:
         df = pd.DataFrame(data["data"])
         df['date'] = pd.to_datetime(df['date'])
@@ -89,11 +108,14 @@ try:
                         close=df['close'])])
         
         fig.update_layout(xaxis_rangeslider_visible=False, height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No data available yet. Start the algo.")
 except Exception as e:
     st.error(f"Error fetching data: {e}")
+    import traceback
+    st.code(traceback.format_exc())
+
 
 # Tabbed interface for Orders, Positions, and Trades
 st.header("Trading Activity")
@@ -108,16 +130,6 @@ with tab1:
             orders = orders_data.get("orders", [])
             if orders:
                 df_orders = pd.DataFrame(orders)
-                # Format the dataframe for display
-                display_cols = ["order_id", "symbol", "action", "total_quantity", 
-                              "order_type", "status", "filled", "remaining", "avg_fill_price"]
-                
-                # Only include avg_fill_price if it exists in the data
-                if "avg_fill_price" in df_orders.columns:
-                    df_orders_display = df_orders[display_cols]
-                else:
-                    display_cols.remove("avg_fill_price")
-                    df_orders_display = df_orders[display_cols]
                 
                 # Color code by status
                 def highlight_status(row):
@@ -129,8 +141,62 @@ with tab1:
                         return ['background-color: #FFB6C1'] * len(row)
                     return [''] * len(row)
                 
+                # Format the dataframe for display
+                display_cols = ["order_id", "symbol", "action", "total_quantity", 
+                              "order_type", "status", "filled", "remaining"]
+                if "avg_fill_price" in df_orders.columns:
+                    display_cols.append("avg_fill_price")
+                if "limit_price" in df_orders.columns:
+                    display_cols.append("limit_price")
+                
+                df_orders_display = df_orders[display_cols]
                 st.dataframe(df_orders_display.style.apply(highlight_status, axis=1), 
-                            use_container_width=True)
+                            width='stretch')
+                
+                # Add action buttons for pending orders
+                st.subheader("Order Actions")
+                pending_orders = df_orders[df_orders['status'].isin(['Submitted', 'PreSubmitted'])]
+                
+                if len(pending_orders) > 0:
+                    for idx, order in pending_orders.iterrows():
+                        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                        with col1:
+                            st.write(f"Order #{order['order_id']}: {order['action']} {order['total_quantity']} {order['symbol']}")
+                        with col2:
+                            if order['order_type'] in ['LMT', 'STP', 'STP LMT']:
+                                new_price = st.number_input(
+                                    f"New price", 
+                                    value=float(order.get('limit_price', 0) or 0),
+                                    key=f"price_{order['order_id']}",
+                                    step=0.01
+                                )
+                        with col3:
+                            if st.button(f"✏️ Modify", key=f"mod_{order['order_id']}"):
+                                if order['order_type'] in ['LMT', 'STP', 'STP LMT']:
+                                    response = requests.post(
+                                        f"{API_URL}/modify_order",
+                                        params={"order_id": int(order['order_id']), "new_price": new_price}
+                                    )
+                                    if response.json().get('success'):
+                                        st.success(f"Modified order {order['order_id']}")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Failed: {response.json().get('error')}")
+                        with col4:
+                            if st.button(f"❌ Cancel", key=f"cancel_{order['order_id']}"):
+                                response = requests.post(
+                                    f"{API_URL}/cancel_order",
+                                    params={"order_id": int(order['order_id'])}
+                                )
+                                if response.json().get('success'):
+                                    st.success(f"Cancelled order {order['order_id']}")
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed to cancel")
+                else:
+                    st.info("No pending orders to modify or cancel")
             else:
                 st.info("✅ No orders found")
         else:
@@ -141,93 +207,150 @@ with tab1:
 with tab2:
     st.subheader("Open Positions")
     try:
-        positions_data = requests.get(f"{API_URL}/positions").json()
-        if positions_data.get("connected"):
-            positions = positions_data.get("positions", [])
-            if positions:
-                df_positions = pd.DataFrame(positions)
+        portfolio_data = requests.get(f"{API_URL}/portfolio").json()
+        if portfolio_data.get("connected"):
+            portfolio = portfolio_data.get("portfolio", [])
+            if portfolio:
+                df_portfolio = pd.DataFrame(portfolio)
                 
-                # Format columns for better display
-                if 'avg_cost' in df_positions.columns:
-                    df_positions['avg_cost'] = df_positions['avg_cost'].apply(lambda x: f"${x:.2f}")
+                # Calculate PnL percentage
+                df_portfolio['pnl_pct'] = (df_portfolio['unrealized_pnl'] / 
+                                          (df_portfolio['average_cost'] * abs(df_portfolio['position'])) * 100)
                 
-                st.dataframe(df_positions, use_container_width=True)
+                # Display portfolio with formatting
+                st.dataframe(
+                    df_portfolio[['symbol', 'local_symbol', 'position', 'average_cost', 
+                                 'market_price', 'market_value', 'unrealized_pnl', 'pnl_pct']]
+                    .style.format({
+                        'average_cost': '${:.2f}',
+                        'market_price': '${:.2f}',
+                        'market_value': '${:,.2f}',
+                        'unrealized_pnl': '${:,.2f}',
+                        'pnl_pct': '{:.2f}%'
+                    })
+                    .applymap(lambda x: 'color: green; font-weight: bold' if isinstance(x, (int, float)) and x > 0 
+                             else ('color: red; font-weight: bold' if isinstance(x, (int, float)) and x < 0 else ''),
+                             subset=['unrealized_pnl', 'pnl_pct']),
+                    width='stretch'
+                )
+                
+                # Action buttons for each position
+                st.subheader("Position Actions")
+                for idx, pos in df_portfolio.iterrows():
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        direction = "LONG" if pos['position'] > 0 else "SHORT"
+                        st.write(f"{pos['local_symbol']}: {direction} {abs(pos['position'])} @ ${pos['average_cost']:.2f} | "
+                                f"P&L: ${pos['unrealized_pnl']:,.2f} ({pos['pnl_pct']:.2f}%)")
+                    with col2:
+                        if st.button(f"🔴 Close Position", key=f"close_{pos['local_symbol']}"):
+                            response = requests.post(
+                                f"{API_URL}/close_position",
+                                params={
+                                    "symbol": pos['symbol'],
+                                    "local_symbol": pos['local_symbol'],
+                                    "quantity": int(pos['position'])
+                                }
+                            )
+                            if response.json().get('success'):
+                                st.success(f"Closing {pos['local_symbol']}")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(f"Failed: {response.json().get('error')}")
+                    with col3:
+                        unrealized = pos['unrealized_pnl']
+                        if unrealized > 0:
+                            st.markdown("🟢 **Profit**")
+                        elif unrealized < 0:
+                            st.markdown("🔴 **Loss**")
+                        else:
+                            st.markdown("⚪ **Break-even**")
                 
                 # Summary metrics
-                st.caption(f"Total positions: {len(df_positions)}")
+                total_unrealized = df_portfolio['unrealized_pnl'].sum()
+                total_value = df_portfolio['market_value'].sum()
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                col1.metric("Total Market Value", f"${total_value:,.2f}")
+                col2.metric("Total Unrealized P&L", f"${total_unrealized:,.2f}",
+                           delta=f"${total_unrealized:,.2f}", delta_color="normal")
             else:
                 st.info("✅ No open positions")
         else:
             st.warning("⚠️ Not connected to IBKR")
     except Exception as e:
-        st.error(f"❌ Error fetching positions: {e}")
+        st.error(f"❌ Error fetching portfolio: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
 with tab3:
-    st.subheader("Trade History")
+    st.subheader("Trade History (Filled Orders)")
     
     # Filter options
-    col1, col2, col3 = st.columns([1, 1, 3])
+    col1, col2 = st.columns([1, 3])
     with col1:
-        trade_filter = st.selectbox("Status", ["All", "Open", "Closed"], index=0)
-    with col2:
         limit = st.selectbox("Show", [10, 20, 50, 100], index=1)
     
     try:
-        trades_data = requests.get(f"{API_URL}/trades").json()
-        trades = trades_data.get("trades", [])
+        # Get all orders and filter for filled ones
+        orders_data = requests.get(f"{API_URL}/orders").json()
         
-        st.caption(f"Total trades in database: {len(trades)}")
-        
-        if trades:
-            df_trades = pd.DataFrame(trades)
+        if orders_data.get("connected"):
+            all_orders = orders_data.get("orders", [])
             
-            # Apply filter
-            if trade_filter == "Open":
-                df_trades = df_trades[df_trades['status'] == 'OPEN']
-            elif trade_filter == "Closed":
-                df_trades = df_trades[df_trades['status'] == 'CLOSED']
+            # Filter for filled orders only
+            filled_orders = [order for order in all_orders if order.get('status') == 'Filled']
             
-            if len(df_trades) == 0:
-                st.info(f"✅ No {trade_filter.lower()} trades")
-            else:
-                # Format timestamps
-                if 'entry_time' in df_trades.columns:
-                    df_trades['entry_time'] = pd.to_datetime(df_trades['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
-                if 'exit_time' in df_trades.columns:
-                    df_trades['exit_time'] = pd.to_datetime(df_trades['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
+            st.caption(f"Total filled orders: {len(filled_orders)}")
+            
+            if filled_orders:
+                df_filled = pd.DataFrame(filled_orders)
                 
-                # Select columns for display
-                display_cols = ['id', 'symbol', 'direction', 'quantity', 'entry_time', 
-                               'entry_price', 'exit_price', 'status', 'pnl']
-                df_trades_display = df_trades[display_cols].head(limit)
+                # Select and rename columns for display
+                display_data = []
+                for _, order in df_filled.iterrows():
+                    display_data.append({
+                        'Order ID': order['order_id'],
+                        'Symbol': order['symbol'],
+                        'Action': order['action'],
+                        'Quantity': order['total_quantity'],
+                        'Type': order['order_type'],
+                        'Avg Price': f"${order.get('avg_fill_price', 0):.2f}" if order.get('avg_fill_price') else 'N/A',
+                        'Status': order['status']
+                    })
                 
-                # Color code PnL
-                def color_pnl(val):
-                    if pd.isna(val) or val == 0:
-                        return ''
-                    color = 'green' if val > 0 else 'red'
-                    return f'color: {color}; font-weight: bold'
+                df_display = pd.DataFrame(display_data).head(limit)
                 
-                styled_df = df_trades_display.style.applymap(color_pnl, subset=['pnl'])
+                # Apply color coding
+                def color_action(val):
+                    if val == 'BUY':
+                        return 'color: green; font-weight: bold'
+                    elif val == 'SELL':
+                        return 'color: red; font-weight: bold'
+                    return ''
                 
-                st.dataframe(styled_df, use_container_width=True)
+                styled_df = df_display.style.applymap(color_action, subset=['Action'])
+                st.dataframe(styled_df, width='stretch')
                 
                 # Summary statistics
-                if 'pnl' in df_trades.columns:
-                    total_pnl = df_trades['pnl'].sum()
-                    avg_pnl = df_trades['pnl'].mean()
-                    
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Trades Shown", len(df_trades_display))
-                    col2.metric("Total PnL", f"${total_pnl:.2f}")
-                    col3.metric("Avg PnL", f"${avg_pnl:.2f}")
+                buy_orders = df_filled[df_filled['action'] == 'BUY']
+                sell_orders = df_filled[df_filled['action'] == 'SELL']
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Trades Shown", len(df_display))
+                col2.metric("Buy Orders", len(buy_orders))
+                col3.metric("Sell Orders", len(sell_orders))
+            else:
+                st.info("📊 No filled orders yet.")
+                st.caption("Filled orders will appear here once trades are executed.")
         else:
-            st.info("📊 No trades yet. Start the algo and wait for signals!")
-            st.caption("Trades will appear here once the strategy detects CHoCH/BOS signals and executes orders.")
+            st.warning("⚠️ Not connected to IBKR")
     except Exception as e:
-        st.error(f"❌ Error fetching trades: {e}")
-        st.caption("Check that the backend server is running and the database is accessible.")
+        st.error(f"❌ Error fetching trade history: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
-# Auto-refresh
-time.sleep(5)
+# Auto-refresh every second for real-time chart updates
+time.sleep(1)
 st.rerun()

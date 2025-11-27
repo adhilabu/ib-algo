@@ -59,10 +59,16 @@ async def get_status():
     realized_pnl = 0.0
     unrealized_pnl = 0.0
     total_pnl = 0.0
+    margin = 0.0
+    buying_power = 0.0
     
     if trader.ib.connected and trader.ib.ib is not None:
         try:
             realized_pnl, unrealized_pnl, total_pnl = await trader.ib.get_pnl()
+            # Get margin info
+            account_summary = await trader.ib.get_account_summary()
+            margin = account_summary.get('MaintMarginReq', 0.0)
+            buying_power = account_summary.get('BuyingPower', 0.0)
         except Exception as e:
             pass  # Fall back to trader.current_pnl
     
@@ -75,6 +81,8 @@ async def get_status():
             "total": total_pnl,
             "current": trader.current_pnl  # For position sizing
         },
+        "margin": margin,
+        "buying_power": buying_power,
         "positions": len(await trader.ib.get_positions()) if trader.ib.connected and trader.ib.ib is not None else 0
     }
 
@@ -218,5 +226,86 @@ async def get_positions():
     except Exception as e:
         logger.error(f"Error fetching positions: {e}")
         return {"positions": [], "connected": False, "error": str(e)}
+
+@app.get("/account")
+async def get_account():
+    """Get comprehensive account summary including margin and buying power"""
+    try:
+        if not trader.ib.connected or trader.ib.ib is None:
+            return {"account": {}, "connected": False}
+        
+        account_summary = await trader.ib.get_account_summary()
+        return {"account": account_summary, "connected": True}
+    except Exception as e:
+        logger.error(f"Error fetching account summary: {e}")
+        return {"account": {}, "connected": False, "error": str(e)}
+
+@app.get("/portfolio")
+async def get_portfolio():
+    """Get portfolio items with detailed PnL per position"""
+    try:
+        if not trader.ib.connected or trader.ib.ib is None:
+            return {"portfolio": [], "connected": False}
+        
+        portfolio = await trader.ib.get_portfolio()
+        return {"portfolio": portfolio, "connected": True}
+    except Exception as e:
+        logger.error(f"Error fetching portfolio: {e}")
+        return {"portfolio": [], "connected": False, "error": str(e)}
+
+@app.post("/close_position")
+async def close_position_endpoint(symbol: str, local_symbol: str, quantity: int):
+    """Close a position with a market order"""
+    try:
+        if not trader.ib.connected or trader.ib.ib is None:
+            return {"success": False, "error": "Not connected to IBKR"}
+        
+        # Find the contract from current positions
+        positions = trader.ib.ib.positions()
+        target_contract = None
+        
+        for pos in positions:
+            if pos.contract.localSymbol == local_symbol:
+                target_contract = pos.contract
+                break
+        
+        if not target_contract:
+            return {"success": False, "error": f"Position {local_symbol} not found"}
+        
+        trade = await trader.ib.close_position(target_contract, quantity)
+        
+        if trade:
+            return {"success": True, "order_id": trade.order.orderId}
+        else:
+            return {"success": False, "error": "Failed to place close order"}
+    except Exception as e:
+        logger.error(f"Error closing position: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/cancel_order")
+async def cancel_order_endpoint(order_id: int):
+    """Cancel a pending order"""
+    try:
+        if not trader.ib.connected or trader.ib.ib is None:
+            return {"success": False, "error": "Not connected to IBKR"}
+        
+        success = await trader.ib.cancel_order(order_id)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Error cancelling order: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/modify_order")
+async def modify_order_endpoint(order_id: int, new_price: float):
+    """Modify an order's price"""
+    try:
+        if not trader.ib.connected or trader.ib.ib is None:
+            return {"success": False, "error": "Not connected to IBKR"}
+        
+        success = await trader.ib.modify_order(order_id, new_price)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Error modifying order: {e}")
+        return {"success": False, "error": str(e)}
 
 

@@ -172,3 +172,143 @@ class IBConnector:
         
         total_pnl = realized_pnl + unrealized_pnl
         return realized_pnl, unrealized_pnl, total_pnl
+
+    async def get_account_summary(self):
+        """
+        Get comprehensive account summary including margin, buying power, etc.
+        Returns a dictionary with key account metrics.
+        """
+        if not self.connected or self.ib is None:
+            return {}
+            
+        account_summary = await self.ib.accountSummaryAsync()
+        
+        summary_dict = {}
+        
+        # Extract important account metrics
+        for item in account_summary:
+            # Convert value to float for numeric fields
+            try:
+                value = float(item.value)
+            except (ValueError, TypeError):
+                value = item.value
+                
+            summary_dict[item.tag] = value
+        
+        # Return commonly used fields with defaults
+        return {
+            'NetLiquidation': summary_dict.get('NetLiquidation', 0.0),
+            'TotalCashValue': summary_dict.get('TotalCashValue', 0.0),
+            'AvailableFunds': summary_dict.get('AvailableFunds', 0.0),
+            'BuyingPower': summary_dict.get('BuyingPower', 0.0),
+            'MaintMarginReq': summary_dict.get('MaintMarginReq', 0.0),
+            'ExcessLiquidity': summary_dict.get('ExcessLiquidity', 0.0),
+            'RealizedPnL': summary_dict.get('RealizedPnL', 0.0),
+            'UnrealizedPnL': summary_dict.get('UnrealizedPnL', 0.0),
+        }
+
+    async def get_portfolio(self):
+        """
+        Get portfolio items with detailed position information and PnL.
+        Returns a list of dictionaries with position details.
+        """
+        if not self.connected or self.ib is None:
+            return []
+            
+        portfolio_items = self.ib.portfolio()
+        
+        portfolio_list = []
+        for item in portfolio_items:
+            portfolio_list.append({
+                'symbol': item.contract.symbol if hasattr(item.contract, 'symbol') else 'N/A',
+                'local_symbol': item.contract.localSymbol if hasattr(item.contract, 'localSymbol') else 'N/A',
+                'position': item.position,
+                'market_price': item.marketPrice,
+                'market_value': item.marketValue,
+                'average_cost': item.averageCost,
+                'unrealized_pnl': item.unrealizedPNL,
+                'realized_pnl': item.realizedPNL,
+                'account': item.account,
+            })
+        
+        return portfolio_list
+
+    async def close_position(self, contract, quantity: int):
+        """
+        Close a position with a market order.
+        Args:
+            contract: The contract object or symbol
+            quantity: The quantity to close (positive number)
+        Returns:
+            Trade object
+        """
+        if not self.connected or self.ib is None:
+            logger.error("Not connected to IBKR")
+            return None
+            
+        # Determine action based on current position
+        # If quantity is positive in portfolio, we need to SELL to close
+        # If quantity is negative (short), we need to BUY to close
+        action = 'SELL' if quantity > 0 else 'BUY'
+        
+        order = MarketOrder(action, abs(quantity))
+        trade = self.ib.placeOrder(contract, order)
+        
+        logger.info(f"Closing position: {action} {abs(quantity)} contracts")
+        return trade
+
+    async def cancel_order(self, order_id: int):
+        """
+        Cancel an order by order ID.
+        Args:
+            order_id: The order ID to cancel
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.connected or self.ib is None:
+            logger.error("Not connected to IBKR")
+            return False
+            
+        # Find the trade with this order ID
+        trades = self.ib.trades()
+        for trade in trades:
+            if trade.order.orderId == order_id:
+                self.ib.cancelOrder(trade.order)
+                logger.info(f"Cancelled order {order_id}")
+                return True
+        
+        logger.warning(f"Order {order_id} not found")
+        return False
+
+    async def modify_order(self, order_id: int, new_price: float):
+        """
+        Modify an existing order's price.
+        Args:
+            order_id: The order ID to modify
+            new_price: The new limit/stop price
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.connected or self.ib is None:
+            logger.error("Not connected to IBKR")
+            return False
+            
+        # Find the trade with this order ID
+        trades = self.ib.trades()
+        for trade in trades:
+            if trade.order.orderId == order_id:
+                # Modify the order based on type
+                if trade.order.orderType == 'LMT':
+                    trade.order.lmtPrice = new_price
+                elif trade.order.orderType in ['STP', 'STOP']:
+                    trade.order.auxPrice = new_price
+                elif trade.order.orderType == 'STP LMT':
+                    trade.order.auxPrice = new_price
+                
+                # Re-place the order
+                self.ib.placeOrder(trade.contract, trade.order)
+                logger.info(f"Modified order {order_id} with new price {new_price}")
+                return True
+        
+        logger.warning(f"Order {order_id} not found")
+        return False

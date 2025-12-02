@@ -24,7 +24,7 @@ cd "$PROJECT_DIR"
 # Function to gracefully stop trading
 stop_trading() {
     echo -e "${BLUE}🛑 Stopping trading bot...${NC}"
-    if curl -s -X POST http://localhost:8000/stop > /dev/null 2>&1; then
+    if curl -s -X POST http://localhost:8005/stop > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Trading bot stopped gracefully${NC}"
         sleep 2
     else

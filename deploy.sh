@@ -145,7 +145,7 @@ sleep 2
 
 # Start FastAPI backend
 echo -e "${BLUE}🚀 Starting FastAPI backend...${NC}"
-nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > logs/fastapi.log 2>&1 &
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload > logs/fastapi.log 2>&1 &
 FASTAPI_PID=$!
 echo $FASTAPI_PID > logs/fastapi.pid
 echo -e "${GREEN}✅ FastAPI started (PID: $FASTAPI_PID)${NC}"
@@ -153,7 +153,7 @@ echo -e "${GREEN}✅ FastAPI started (PID: $FASTAPI_PID)${NC}"
 # Wait for FastAPI to be ready
 echo -e "${BLUE}⏳ Waiting for FastAPI to be ready...${NC}"
 for i in {1..15}; do
-    if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+    if curl -s http://localhost:8005/health > /dev/null 2>&1; then
         echo -e "${GREEN}✅ FastAPI is ready${NC}"
         break
     fi
@@ -199,17 +199,17 @@ echo -e "${GREEN}✅ Deployment Complete!${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 echo -e "${BLUE}📡 Services:${NC}"
-echo -e "   • FastAPI:     ${GREEN}http://localhost:8000${NC}"
-echo -e "   • API Docs:    ${GREEN}http://localhost:8000/docs${NC}"
+echo -e "   • FastAPI:     ${GREEN}http://localhost:8005${NC}"
+echo -e "   • API Docs:    ${GREEN}http://localhost:8005/docs${NC}"
 echo -e "   • PostgreSQL:  ${GREEN}localhost:5432${NC}"
 if [ -f "logs/streamlit.pid" ]; then
     echo -e "   • Dashboard:   ${GREEN}http://localhost:8501${NC}"
 fi
 echo ""
 echo -e "${BLUE}🎮 Control:${NC}"
-echo -e "   • Start trading:  ${YELLOW}curl -X POST http://localhost:8000/start${NC}"
-echo -e "   • Stop trading:   ${YELLOW}curl -X POST http://localhost:8000/stop${NC}"
-echo -e "   • Check status:   ${YELLOW}curl http://localhost:8000/status${NC}"
+echo -e "   • Start trading:  ${YELLOW}curl -X POST http://localhost:8005/start${NC}"
+echo -e "   • Stop trading:   ${YELLOW}curl -X POST http://localhost:8005/stop${NC}"
+echo -e "   • Check status:   ${YELLOW}curl http://localhost:8005/status${NC}"
 echo ""
 echo -e "${BLUE}📊 Monitoring:${NC}"
 echo -e "   • FastAPI logs:   ${YELLOW}tail -f logs/fastapi.log${NC}"

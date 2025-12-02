@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import time
 
-API_URL = "http://localhost:8000"
+API_URL = "http://localhost:8005"
 
 st.set_page_config(page_title="IBKR Algo Dashboard", layout="wide")
 

@@ -178,6 +178,20 @@ class Trader:
         
         if structures:
             logger.info(f"🎯 {len(structures)} structure(s) detected!")
+        else:
+            # Log current status for monitoring
+            last_high = self.strategy.state.last_internal_high
+            last_low = self.strategy.state.last_internal_low
+            current_price = df['close'].iloc[-1]
+            
+            high_str = f"{last_high:.2f}" if last_high is not None else "None"
+            low_str = f"{last_low:.2f}" if last_low is not None else "None"
+            
+            logger.info(
+                f"Tick: {current_price:.2f} | "
+                f"LH: {high_str} | LL: {low_str} | "
+                f"Trend: {self.strategy.state.internal_trend.name}"
+            )
         
         # Only enter new positions if:
         # 1. We have less than target position size (allows scaling)

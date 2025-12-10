@@ -99,7 +99,12 @@ try:
     
     if data["data"]:
         df = pd.DataFrame(data["data"])
-        df['date'] = pd.to_datetime(df['date'])
+        # Ensure date is in UTC as requested
+        df['date'] = pd.to_datetime(df['date'], utc=True)
+        
+        # Display latest price
+        latest_price = df['close'].iloc[-1]
+        st.metric("Latest Price (GC1!)", f"${latest_price:.2f}")
         
         fig = go.Figure(data=[go.Candlestick(x=df['date'],
                         open=df['open'],
